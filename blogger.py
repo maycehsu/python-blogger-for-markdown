@@ -90,11 +90,13 @@ def pdebug(*args):
 
 #from datetime import datetime,timedelta
 def dt_parse(t, GMT_offset=8):
-    ret = datetime.strptime(t[0:16],'%Y-%m-%dT%H:%M')
-    if t[17]=='+':
-        ret+=timedelta(hours=int(t[18:21]),minutes=int(t[22:]))
-    elif t[17]=='-':
-        ret-=timedelta(hours=int(t[18:21]),minutes=int(t[22:]))
+    ret = datetime.strptime(t[0:19],'%Y-%m-%dT%H:%M:%S')
+    if t[19]=='-':
+        ret+=timedelta(hours=int(t[20:22]),minutes=int(t[23:]))
+    elif t[19]=='+':
+        ret-=timedelta(hours=int(t[20:22]),minutes=int(t[23:]))
+    else:
+        perror('wrong format')
     
     if GMT_offset>0:
         ret+=timedelta(hours=GMT_offset)
@@ -238,7 +240,7 @@ class blogger(object):
             record['published']=post['published']
             record['updated']=post['updated']
             conditions={'id=':record['id']}
-            print 'Title:', post['title'], ', len=', len(content),',Checksum=', record['checksum'], ',Updated=', dt_parse(record['updated'])
+            print 'Title:', post['title'], ', len=', len(content),',Checksum=', record['checksum'], ',Updated=',dt_parse(record['updated'])
             DBUtil.db_update_or_insert(self.dbcon, 'posts', record, conditions)
             #conditions_for_update={'id=':record['id'], 'checksum!=':record['checksum']}
             #DBUtil.db_update_or_insert(self.dbcon, 'posts', record, conditions, conditions_for_update=conditions_for_update)
