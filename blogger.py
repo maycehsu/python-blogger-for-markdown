@@ -23,12 +23,14 @@ config.read(os.path.join(os.path.dirname(sys.argv[0]), "blogger.ini"))
 
 
 #########global variable in config file##################
-CLIENT_KEY_FILE=eval(config.get('Config', 'CLIENT_KEY_FILE'))
-API_KEY_FILE=eval(config.get('Config', 'API_KEY_FILE'))
+SCRIPT_DIR=os.path.dirname(sys.argv[0])
+CLIENT_KEY_FILE=os.path.join(SCRIPT_DIR, eval(config.get('Config', 'CLIENT_KEY_FILE')))
+API_KEY_FILE=os.path.join(SCRIPT_DIR,eval(config.get('Config', 'API_KEY_FILE')))
 BLOG_ID=eval(config.get('Config', 'BLOG_ID'))
-DB_PATH=eval(config.get('Config', 'DB_PATH'))
-ARTICLE_PATH=eval(config.get('Config', 'ARTICLE_PATH'))
 
+ARTICLE_PATH=eval(config.get('Config', 'ARTICLE_PATH'))
+DB_PATH=ARTICLE_PATH+'/'+eval(config.get('Config', 'DB_PATH'))
+CREDENTIALS_FILE=ARTICLE_PATH+'/credentials.dat'
 
 #########const global variable###################
 TBL_POSTS_FIELDS=['id', 'title', 'filename', 'checksum', 'published', 'updated']
@@ -119,9 +121,9 @@ class blogger(object):
             self.client_data=data['installed']
         
         self.setupDB()
-        print 'connect db',DB_PATH
+        pdebug('connect db',DB_PATH)
         self.dbcon=lite.connect(DB_PATH)
-        print 'connected'
+        
             #pprint.pprint(self.client_data)
         #service = build('blogger', 'v3', developerKey=self.api_key)
     
@@ -141,7 +143,9 @@ class blogger(object):
         # credentials file is provided. If the file does not exist, it is
         # created. This object can only hold credentials for a single user, so
         # as-written, this script can only handle a single user.
-        storage = Storage('credentials.dat')
+        
+        #storage = Storage('credentials.dat')
+        storage = Storage(CREDENTIALS_FILE)
 
         # The get() function returns the credentials for the Storage object. If no
         # credentials were found, None is returned.
@@ -155,21 +159,23 @@ class blogger(object):
         # If the user grants access, the run_flow() function returns new credentials.
         # The new credentials are also stored in the supplied Storage object,
         # which updates the credentials.dat file.
-        print 'check credentials'
+        pdebug('check credentials')
         if credentials is None or credentials.invalid:
-            print 'credentials is None or Invalid, re-run flow'
-            credentials = tools.run_flow(flow, storage, tools.argparser.parse_args())
+            pdebug('credentials is None or Invalid, re-run flow')
+            #credentials = tools.run_flow(flow, storage, tools.argparser.parse_args())
+            credentials = tools.run_flow(flow, storage, tools.argparser.parse_args([]))
+            #credentials = tools.run_flow(flow, storage, None)
 
         # Create an httplib2.Http object to handle our HTTP requests, and authorize it
         # using the credentials.authorize() function.
-        print 'authorize'
+        pdebug('authorize')
         http = httplib2.Http(cache=".cache")
         http = credentials.authorize(http)
-        print 'authorize done'
+       
         
-        print 'build blogger v3 service'
+        pdebug('build blogger v3 service')
         self.service = build('blogger', 'v3', http=http)
-        print 'build blogger v3 service done'
+        
     
     ###########blogger API#################
     """
@@ -227,7 +233,7 @@ class blogger(object):
         service=self.service
         posts=service.posts()
         post_list=posts.list(blogId=BLOG_ID).execute()
-        print '============posts sync to db=============='
+        pdebug('============posts sync to db==============')
         for post in post_list['items']:
             #print '#', post['id']
             
@@ -240,13 +246,13 @@ class blogger(object):
             record['published']=post['published']
             record['updated']=post['updated']
             conditions={'id=':record['id']}
-            print 'Title:', post['title'], ', len=', len(content),',Checksum=', record['checksum'], ',Updated=',dt_parse(record['updated'])
+            pdebug('Title:', post['title'], ', len=', len(content),',Checksum=', record['checksum'], ',Updated=',dt_parse(record['updated']))
             DBUtil.db_update_or_insert(self.dbcon, 'posts', record, conditions)
             #conditions_for_update={'id=':record['id'], 'checksum!=':record['checksum']}
             #DBUtil.db_update_or_insert(self.dbcon, 'posts', record, conditions, conditions_for_update=conditions_for_update)
     
     def show_posts_from_db(self):
-        print '=========show from db============'
+        pdebug('=========show from db============')
         fields=TBL_POSTS_FIELDS
         r=DBUtil.db_fetch_data(self.dbcon, 'posts', fields, None)
         for row in r:
@@ -263,8 +269,8 @@ class blogger(object):
         
         files_info=[]
         files = [f for f in os.listdir(mypath) if os.path.isfile(os.path.join(mypath, f))]
-        print '===========scan files=========='
-        print 'Path=', mypath
+        pdebug('===========scan files==========')
+        pdebug('Path=', mypath)
         for f in files:
             if f.endswith('.md'):
                 path=os.path.join(mypath, f)
@@ -279,11 +285,14 @@ class blogger(object):
                     
                         #compare html modified time < md modified time to re-generate html
                         html_path=path[:-3]+'.html'
-                        html_mtime=os.path.getmtime(html_path)
+                        if os.path.isfile(html_path):
+                            html_mtime=os.path.getmtime(html_path)
+                        else:
+                            html_mtime=0
                         md_mtime=os.path.getmtime(path)
                         
                         if force_regenerate_html or not os.path.isfile(html_path) or html_mtime < md_mtime:
-                            print 'generate html file for ', title, '...'
+                            pdebug('generate html file for ', title, '...')
                             with open(html_path, 'w') as f_out:
                                 html = markdown.markdown(content, extensions=['markdown.extensions.extra'])
                                 html = html.encode('utf-8')
@@ -297,24 +306,26 @@ class blogger(object):
                                 mtime = datetime.fromtimestamp(os.path.getmtime(path))
                                 file_info={'title':title.decode('utf-8'), 'path':path, 'html_path':html_path, 'checksum':checksum, 'len':content_len, 'mtime':mtime}
                                 files_info.append(file_info)
-                                print '[ready]', title, 'len=', content_len, 'checksum=', checksum, ', modified=',mtime
+                                pdebug('[ready]', title, 'len=', content_len, 'checksum=', checksum, ', modified=',mtime)
                         else:
                             perror('[not ready]', title)
                             pass
                     else:
-                        print '[draft]', title
+                        pdebug('[draft]', title)
                         #ignore draft
                         pass
         if files_info:
             self.articles=files_info
-            print 'Total ', len(files_info), 'files are ready'
+            pdebug('Total ', len(files_info), 'files are ready')
             #record information local html files: title, file-path, modified time, checksum
                     
     def publish_or_update(self, dry_run=False):
         #if scan complete, do publish or update
         #if no title found and no [draft] found in title, publish
         #if title found, checksum is different, check html modified timestamp > update timestamp -> update
-        print '=======publish or update===='
+        update=0
+        new=0
+        pdebug('=======publish or update====')
         for file_info in self.articles:
             conditions={u'title=':file_info['title']}
             fields=[u'id', u'title', u'checksum', u'updated']
@@ -324,7 +335,7 @@ class blogger(object):
                 #print 'title found', file_info['title']
                 post=dict(zip(fields, r[0]))
                 post_updated = dt_parse(post['updated'])
-                print 'checking...', file_info['title'], 'checksum:', file_info['checksum'], post['checksum'] 
+                pdebug('checking...', file_info['title'], 'checksum:', file_info['checksum'], post['checksum'])
                 if post['checksum']!=file_info['checksum'] and post_updated<file_info['mtime']:
                     #update
                     print '[update]#%s '%(post['id']), file_info['title'], ', modified:', file_info['mtime'], 'checksum:', file_info['checksum']
@@ -333,11 +344,12 @@ class blogger(object):
                             content=reader.read()
                             r=self.post_update(BLOG_ID, post['id'], file_info['title'], content)
                             if r:
-                                print 'update success'
+                                update+=1
+                                pdebug('update success')
                 elif post['checksum']==file_info['checksum']:
-                    print '[content no change]',file_info['title'], ', checksum=',file_info['checksum']
+                    pdebug('[content no change]',file_info['title'], ', checksum=',file_info['checksum'])
                 elif  post_updated>file_info['mtime']:
-                    print '[file no update]', file_info['title'], ', post update=', post_updated, ', file mtime=', file_info['mtime']
+                    pdebug('[file no update]', file_info['title'], ', post update=', post_updated, ', file mtime=', file_info['mtime'])
                    
                 
             else:
@@ -345,17 +357,21 @@ class blogger(object):
                     perror('more than one article found with same title, conflict')
                 else:
                     #no title found, new article, publish
-                    print '[publish]', file_info['title'], ', modified:', file_info['mtime'], 'checksum:', file_info['checksum']
+                    pdebug('[publish]', file_info['title'], ', modified:', file_info['mtime'], 'checksum:', file_info['checksum'])
                     if not dry_run:
                         with open(file_info['html_path'], 'r') as reader:
                             content=reader.read()
                             r=self.post_insert(BLOG_ID, file_info['title'], content)
                             if r:
-                                print 'publish success'
-                        
+                                new+=1
+                                pdebug('publish success')
+        if new or update:
+            print 'New:',new,', update:',update, ',upload complete'
+        else:
+            print 'No update'            
     
     def setupDB(self):
-        print("Setting up the database: " + DB_PATH)
+        pdebug("Setting up the database: " + DB_PATH)
         con = None
         try:
             con = lite.connect(DB_PATH)
@@ -384,7 +400,7 @@ class blogger(object):
                 con.close()
             sys.exit(1)
         finally:
-            print("Completed database setup")
+            pdebug("Completed database setup")
             
 class DBUtil(object):
     @staticmethod
@@ -511,6 +527,12 @@ if __name__ == '__main__':
                         help='run scan files and update/create posts')
     parser.add_argument('-d', '--dry-run', action='store_true',
                         help='dry run to show ready to update/create articles')
+    
+    parser.add_argument('-t', '--auto', action='store',
+                        help='for automator to run update for specific folder')
+    
+    parser.add_argument('-e', '--silent', action='store_true',
+                        help='suppress output')
     #parser.add_argument('-i', '--title', action='store',
     #                    help='Title for uploaded files')
     #parser.add_argument('-e', '--description', action='store',
@@ -520,7 +542,7 @@ if __name__ == '__main__':
     
     blogger=blogger()
     blogger.client_authorize()
-    if args.run:
+    if args.run or args.auto:
         blogger.get_posts_and_sync_to_db()
         blogger.scan_local_articles()
         blogger.publish_or_update()
@@ -538,8 +560,8 @@ if __name__ == '__main__':
         if args.show_db:
             print 'show posts in db...'
             blogger.show_posts_from_db()
-        else:
-            print 'Invalid argument'
+        
+        
     
     
     
